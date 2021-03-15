@@ -15,7 +15,7 @@ onmessage = function(e) {
     let tiles = new TileArray(new Cuboid(new vec3(offset.x * 64, offset.y * 64, offset.z * 64), new vec3(64, 64, 64)));
     tiles.initialize({
         generator: (tile, position) => {
-            let stackedLayerNoise = noise3(position.divv(new vec3(32, 1, 32)));
+            let stackedLayerNoise = noise3(position.divv(new vec3(32, 7, 32)));
             return  (stackedLayerNoise > 0.05) ? TileType.FULL : TileType.EMPTY;
         }
     });
