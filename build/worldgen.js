@@ -100,13 +100,15 @@ var TileArray = /** @class */ (function () {
                     }));
                     (_c = rdata.uv).push.apply(_c, TileArray.blockUV);
                 };
-                if (_this.hasAdjacent(position, direction)) {
-                    if (tile != _this.getAdjacent(position, direction)) {
+                if (tile != TileType.EMPTY) {
+                    if (_this.hasAdjacent(position, direction)) {
+                        if (_this.getAdjacent(position, direction) == TileType.EMPTY) {
+                            addFace();
+                        }
+                    }
+                    else {
                         addFace();
                     }
-                }
-                else if (tile != TileType.EMPTY) {
-                    addFace();
                 }
             });
         });

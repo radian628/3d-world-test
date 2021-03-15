@@ -171,12 +171,14 @@ export class TileArray {
                     }));
                     rdata.uv.push(...TileArray.blockUV);
                 }
-                if (this.hasAdjacent(position, direction)) {
-                    if (tile != this.getAdjacent(position, direction)) {
+                if (tile != TileType.EMPTY) {
+                    if (this.hasAdjacent(position, direction)) {
+                        if (this.getAdjacent(position, direction) == TileType.EMPTY) {
+                            addFace();
+                        }
+                    } else  {
                         addFace();
                     }
-                } else if (tile != TileType.EMPTY) {
-                    addFace();
                 }
             });
         });
