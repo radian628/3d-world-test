@@ -84,6 +84,12 @@ var vec3 = /** @class */ (function () {
     vec3.prototype.cross = function (v) {
         return new vec3(this.y * v.z - this.z * v.y, this.z * v.x - this.x * v.z, this.x * v.y - this.y * v.x);
     };
+    vec3.prototype.equals = function (v) {
+        return this.x == v.x && this.y == v.y && this.z == v.z;
+    };
+    vec3.from = function (obj) {
+        return new vec3(obj.x, obj.y, obj.z);
+    };
     return vec3;
 }());
 export { vec3 };

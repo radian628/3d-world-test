@@ -62,3 +62,48 @@ var OctreeNode = /** @class */ (function () {
     };
     return OctreeNode;
 }());
+var Vec3LookupTable = /** @class */ (function () {
+    function Vec3LookupTable() {
+        this.contents = new Map();
+    }
+    Vec3LookupTable.prototype.get = function (v) {
+        var _a, _b, _c;
+        return (_c = (_b = (_a = this.contents) === null || _a === void 0 ? void 0 : _a.get(v.x)) === null || _b === void 0 ? void 0 : _b.get(v.y)) === null || _c === void 0 ? void 0 : _c.get(v.z);
+    };
+    Vec3LookupTable.prototype.set = function (v, data) {
+        var yMap = this.contents.has(v.x) ? this.contents.get(v.x) : this.contents.set(v.x, new Map()).get(v.x);
+        var zMap = yMap.has(v.y) ? yMap.get(v.y) : yMap.set(v.y, new Map()).get(v.y);
+        zMap.set(v.z, data);
+    };
+    Vec3LookupTable.prototype["delete"] = function (v) {
+        var yMap = this.contents.get(v.x);
+        var zMap = yMap.get(v.y);
+        zMap["delete"](v.z);
+        if (zMap.size == 0) {
+            yMap["delete"](v.y);
+            if (yMap.size == 0) {
+                this.contents["delete"](v.x);
+            }
+        }
+    };
+    Vec3LookupTable.prototype.has = function (v) {
+        if (!this.contents.has(v.x))
+            return false;
+        if (!this.contents.get(v.x).has(v.y))
+            return false;
+        if (!this.contents.get(v.x).get(v.y).has(v.z))
+            return false;
+        return true;
+    };
+    Vec3LookupTable.prototype.forEach = function (callback) {
+        this.contents.forEach(function (yMap, x) {
+            yMap.forEach(function (zMap, y) {
+                zMap.forEach(function (value, z) {
+                    callback(value, new vec3(x, y, z));
+                });
+            });
+        });
+    };
+    return Vec3LookupTable;
+}());
+export { Vec3LookupTable };

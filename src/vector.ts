@@ -64,6 +64,12 @@ export class vec2 implements vector<vec2> {
     }
 }
 
+interface vec3able {
+    x: number;
+    y: number;
+    z: number;
+}
+
 export class vec3 implements vector<vec3> {
     x: number;
     y: number;
@@ -133,6 +139,14 @@ export class vec3 implements vector<vec3> {
             this.z * v.x - this.x * v.z,
             this.x * v.y - this.y * v.x
         );
+    }
+
+    equals(v: vec3): boolean {
+        return this.x == v.x && this.y == v.y && this.z == v.z;
+    }
+
+    static from(obj: vec3able) {
+        return new vec3(obj.x, obj.y, obj.z);
     }
 }
 

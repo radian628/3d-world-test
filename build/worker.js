@@ -1,22 +1,83 @@
 import { vec3 } from "./vector.js";
 import { noise3 } from "./noise.js";
-import { Cuboid } from "./util.js";
+import { Cuboid, Vec3LookupTable } from "./util.js";
 import { TileType, TileArray } from "./worldgen.js";
-onmessage = function (e) {
-    var offset = e.data[0];
+var chunkSize = 64;
+export var MessageType;
+(function (MessageType) {
+    MessageType[MessageType["LOAD"] = 0] = "LOAD";
+    MessageType[MessageType["LOAD_RESPONSE"] = 1] = "LOAD_RESPONSE";
+    MessageType[MessageType["GENERATE_SEND_BUFFER"] = 2] = "GENERATE_SEND_BUFFER";
+    MessageType[MessageType["SEND_BUFFER_RESPONSE"] = 3] = "SEND_BUFFER_RESPONSE";
+})(MessageType || (MessageType = {}));
+var chunks = new Vec3LookupTable();
+function loadChunk(payload) {
+    var chunkPosition = vec3.from(payload.chunk);
+    if (!chunks.has(chunkPosition)) {
+        var loadedChunk = new TileArray(new Cuboid(chunkPosition.mult(chunkSize), new vec3(chunkSize, chunkSize, chunkSize)));
+        chunks.set(chunkPosition, loadedChunk);
+        loadedChunk.initialize({
+            generator: function (tile, position) {
+                var stackedLayerNoise = noise3(position.divv(new vec3(32, 7, 32)));
+                return (stackedLayerNoise > 0.05) ? TileType.FULL : TileType.EMPTY;
+            }
+        });
+        chunks.forEach(function (tileArray, vector) {
+            console.log(vector, tileArray);
+        });
+        //@ts-ignore
+        postMessage({ messageType: MessageType.LOAD_RESPONSE, payload: { chunk: chunkPosition } });
+    }
+}
+function generateAndSendBuffer(payload) {
+    var chunkPosition = vec3.from(payload.chunk);
+    if (!chunks.has(chunkPosition)) {
+        //console.log("THIS SHOULDVE BEEN GEENRATAED SKDJFLSDJFSDK")
+        loadChunk(payload);
+    }
+    var chunk = chunks.get(chunkPosition);
     var renderData = {
         verts: [],
         normals: [],
         uv: []
     };
-    var tiles = new TileArray(new Cuboid(new vec3(offset.x * 64, offset.y * 64, offset.z * 64), new vec3(64, 64, 64)));
-    tiles.initialize({
-        generator: function (tile, position) {
-            var stackedLayerNoise = noise3(position.divv(new vec3(32, 7, 32)));
-            return (stackedLayerNoise > 0.05) ? TileType.FULL : TileType.EMPTY;
-        }
-    });
-    tiles.appendRenderData(renderData);
+    chunk.appendRenderData(renderData);
+    var tVerts = new Float32Array(renderData.verts);
+    var tNormals = new Float32Array(renderData.normals);
+    var tUV = new Float32Array(renderData.uv);
     //@ts-ignore
-    postMessage([renderData]);
+    postMessage({ messageType: MessageType.SEND_BUFFER_RESPONSE, payload: {
+            chunk: chunkPosition,
+            vertex: tVerts,
+            normal: tNormals,
+            UV: tUV
+            //@ts-ignore
+        } }, [tVerts.buffer, tNormals.buffer, tUV.buffer]);
+}
+onmessage = function (e) {
+    // let offset = e.data[0];
+    // let renderData: RenderData = {
+    //     verts: [],
+    //     normals: [],
+    //     uv: []
+    // }
+    // let tiles = new TileArray(new Cuboid(new vec3(offset.x * 64, offset.y * 64, offset.z * 64), new vec3(64, 64, 64)));
+    // tiles.initialize({
+    //     generator: (tile, position) => {
+    //         let stackedLayerNoise = noise3(position.divv(new vec3(32, 7, 32)));
+    //         return  (stackedLayerNoise > 0.05) ? TileType.FULL : TileType.EMPTY;
+    //     }
+    // });
+    // tiles.appendRenderData(renderData);
+    // //@ts-ignore
+    // postMessage([renderData]);
+    var message = e.data;
+    switch (message.messageType) {
+        case MessageType.LOAD:
+            loadChunk(message.payload);
+            break;
+        case MessageType.GENERATE_SEND_BUFFER:
+            generateAndSendBuffer(message.payload);
+            break;
+    }
 };

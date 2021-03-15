@@ -1,11 +1,123 @@
 import { quat, vec3 } from "./vector.js";
+import { Vec3LookupTable } from "./util.js";
+import { MessageType } from "./worker.js";
 var WorkerManager = /** @class */ (function () {
-    function WorkerManager() {
+    function WorkerManager(gl) {
+        this.workers = [];
+        this.gl = gl;
         this.threadCount = navigator.hardwareConcurrency - 1;
+        this.loadedChunks = new Vec3LookupTable();
+        this.loadedChunkCount = new Map();
+        this.chunksToDraw = new Vec3LookupTable();
         for (var i = 0; this.threadCount > i; i++) {
-            this.workers.push(new Worker("./build/worker.js", { type: 'module' }));
+            var worker = new Worker("./build/worker.js", { type: 'module' });
+            this.loadedChunkCount.set(worker, 0);
+            this.initListeners(worker);
+            this.workers.push(worker);
         }
     }
+    WorkerManager.prototype.draw = function (attribs) {
+        var gl = this.gl;
+        this.chunksToDraw.forEach(function (chunkData, position) {
+            attribs.forEach(function (attribInfo) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, chunkData[WorkerManager.attribNameDict[attribInfo.attribName]]);
+                gl.vertexAttribPointer(attribInfo.location, attribInfo.size, gl.FLOAT, false, attribInfo.stride, 0);
+                gl.enableVertexAttribArray(attribInfo.location);
+            });
+            gl.drawArrays(gl.TRIANGLES, 0, chunkData.vertex.length);
+        });
+    };
+    WorkerManager.prototype.addChunkToDrawList = function (chunk) {
+        if (!this.chunksToDraw.has(chunk)) {
+            this.chunksToDraw.set(chunk, this.loadedChunks.get(chunk));
+        }
+    };
+    WorkerManager.prototype.removeChunkFromDrawList = function (chunk) {
+        if (this.chunksToDraw.has(chunk)) {
+            this.chunksToDraw["delete"](chunk);
+        }
+    };
+    WorkerManager.prototype.initListeners = function (worker) {
+        var _this = this;
+        var gl = this.gl;
+        worker.addEventListener("message", function (e) {
+            var message = e.data;
+            var payload = message.payload;
+            switch (message.messageType) {
+                case MessageType.SEND_BUFFER_RESPONSE:
+                    var chunkData = _this.loadedChunks.get(payload.chunk);
+                    chunkData.vertex = payload.vertex;
+                    chunkData.normal = payload.normal;
+                    chunkData.UV = payload.UV;
+                    chunkData.glVertex = gl.createBuffer();
+                    chunkData.glNormal = gl.createBuffer();
+                    chunkData.glUV = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, chunkData.glVertex);
+                    gl.bufferData(gl.ARRAY_BUFFER, chunkData.vertex, gl.STATIC_DRAW);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, chunkData.glNormal);
+                    gl.bufferData(gl.ARRAY_BUFFER, chunkData.normal, gl.STATIC_DRAW);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, chunkData.glUV);
+                    gl.bufferData(gl.ARRAY_BUFFER, chunkData.UV, gl.STATIC_DRAW);
+                    _this.addChunkToDrawList(payload.chunk);
+                    break;
+            }
+        });
+    };
+    WorkerManager.prototype.getLeastActiveWorker = function () {
+        var leastActiveWorker;
+        var leastActiveChunkCount = Infinity;
+        this.loadedChunkCount.forEach(function (count, worker) {
+            if (leastActiveChunkCount > count) {
+                leastActiveChunkCount = count;
+                leastActiveWorker = worker;
+            }
+        });
+        return leastActiveWorker;
+    };
+    WorkerManager.prototype.loadChunk = function (chunk) {
+        var _this = this;
+        return new Promise(function (resolve, reject) {
+            if (!_this.loadedChunks.has(chunk)) {
+                var leastActiveWorker_1 = _this.getLeastActiveWorker();
+                _this.loadedChunks.set(chunk, {
+                    glVertex: undefined,
+                    glNormal: undefined,
+                    glUV: undefined,
+                    vertex: undefined,
+                    normal: undefined,
+                    UV: undefined,
+                    worker: leastActiveWorker_1
+                });
+                _this.loadedChunkCount.set(leastActiveWorker_1, _this.loadedChunkCount.get(leastActiveWorker_1) + 1);
+                var chunkLoadedListener_1 = function (e) {
+                    if (e.data.messageType == MessageType.LOAD_RESPONSE && chunk.equals(e.data.payload.chunk)) {
+                        leastActiveWorker_1.removeEventListener("message", chunkLoadedListener_1);
+                        resolve();
+                    }
+                };
+                leastActiveWorker_1.addEventListener("message", chunkLoadedListener_1);
+                leastActiveWorker_1.postMessage({ messageType: MessageType.LOAD, payload: { chunk: chunk } });
+            }
+            else {
+                resolve();
+            }
+        });
+    };
+    WorkerManager.prototype.generateChunkBuffers = function (chunk) {
+        var chunkData = this.loadedChunks.get(chunk);
+        //console.log(this.loadedChunks);
+        var worker = chunkData.worker;
+        worker.postMessage({ messageType: MessageType.GENERATE_SEND_BUFFER, payload: { chunk: chunk } });
+    };
+    WorkerManager.prototype.allocateChunkBuffers = function (chunk) {
+    };
+    WorkerManager.prototype.generateAndAllocateChunkBuffers = function (chunk) {
+    };
+    WorkerManager.attribNameDict = {
+        "vertexPosition": "glVertex",
+        "surfaceNormal": "glNormal",
+        "UV": "glUV"
+    };
     return WorkerManager;
 }());
 function loadShader(gl, type, source) {
@@ -104,37 +216,43 @@ var renderData = {
 img.onload = function () {
     var time = Date.now();
     console.log("loaded");
-    var workerPromises = [];
-    var t2 = 0;
-    var _loop_1 = function (i) {
-        var worker = new Worker("./build/worker.js", { type: 'module' });
-        workerPromises.push(new Promise(function (resolve) {
-            worker.onmessage = function (e) {
-                var time = Date.now();
-                resolve(0);
-                var newRenderData = e.data[0];
-                for (var i_1 = 0; newRenderData.verts.length > i_1; i_1++) {
-                    renderData.verts.push(newRenderData.verts[i_1]);
-                }
-                for (var i_2 = 0; newRenderData.normals.length > i_2; i_2++) {
-                    renderData.normals.push(newRenderData.normals[i_2]);
-                }
-                for (var i_3 = 0; newRenderData.uv.length > i_3; i_3++) {
-                    renderData.uv.push(newRenderData.uv[i_3]);
-                }
-                t2 += (Date.now() - time);
-                console.log("TIME TAKEN TO CONCAT ARRAY (cumulative): ", t2);
-            };
-        }));
-        worker.postMessage([new vec3(i % 4, 0, (i >> 2) % 4)]);
-    };
-    for (var i = 0; 16 > i; i++) {
-        _loop_1(i);
-    }
-    Promise.all(workerPromises).then(function () {
-        console.log("TIME TAKEN TO GENERATE CHUNKS: ", Date.now() - time);
-        main();
-    });
+    // let workerPromises = [];
+    // let t2 = 0;
+    // for (let i = 0; 16 > i; i++) {
+    //     let worker = new Worker("./build/worker.js", { type: 'module' });
+    //     workerPromises.push(new Promise(resolve => {
+    //         worker.onmessage = e => {
+    //             let time = Date.now();
+    //             resolve(0);
+    //             let newRenderData = e.data[0];
+    //             for (let i = 0; newRenderData.verts.length > i; i++) {
+    //                 renderData.verts.push(newRenderData.verts[i]);
+    //             }
+    //             for (let i = 0; newRenderData.normals.length > i; i++) {
+    //                 renderData.normals.push(newRenderData.normals[i]);
+    //             }
+    //             for (let i = 0; newRenderData.uv.length > i; i++) {
+    //                 renderData.uv.push(newRenderData.uv[i]);
+    //             }
+    //             t2 += (Date.now() - time);
+    //             console.log("TIME TAKEN TO CONCAT ARRAY (cumulative): ", t2);
+    //         }
+    //     }));
+    //     worker.postMessage([new vec3(i % 4, 0, (i >> 2) % 4)]);
+    //     // let tiles = new TileArray(new Cuboid(new vec3((i % 2) * 64, 0, ((i >> 1) % 2) * 64), new vec3(64, 64, 64)));
+    //     // tiles.initialize({
+    //     //     generator: (tile, position) => {
+    //     //         let stackedLayerNoise = noise3(position.divv(new vec3(32, 5, 32)));
+    //     //         return  (stackedLayerNoise > 0.05) ? TileType.FULL : TileType.EMPTY;
+    //     //     }
+    //     // });
+    //     // tiles.appendRenderData(renderData);
+    // }
+    // Promise.all(workerPromises).then(() => {
+    //     console.log("TIME TAKEN TO GENERATE CHUNKS: ", Date.now() - time);
+    //     main();
+    // });
+    main();
 };
 img.src = "test_texture.png";
 function main() {
@@ -162,31 +280,69 @@ function main() {
         modelViewRotation: gl.getUniformLocation(shaderProgram, "modelViewRotation"),
         modelViewTranslation: gl.getUniformLocation(shaderProgram, "modelViewTranslation")
     };
-    var positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(renderData.verts), gl.STATIC_DRAW);
-    var normalBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(renderData.normals), gl.STATIC_DRAW);
-    var uvBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(renderData.uv), gl.STATIC_DRAW);
-    //const indexBuffer = gl.createBuffer();
-    //gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    //gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(elementData), gl.STATIC_DRAW);
+    var workerManager = new WorkerManager(gl);
+    var _loop_1 = function (i) {
+        //let worker = new Worker("./build/worker.js", { type: 'module' });
+        var relativeChunkPos = new vec3(i % 4, 0, (i >> 2) % 4);
+        workerManager.loadChunk(relativeChunkPos).then(function () {
+            workerManager.generateChunkBuffers(relativeChunkPos);
+        });
+    };
+    for (var i = 0; 16 > i; i++) {
+        _loop_1(i);
+    }
+    // const positionBuffer = gl.createBuffer();
+    // gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    // gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(renderData.verts), gl.STATIC_DRAW);
+    // const normalBuffer = gl.createBuffer();
+    // gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+    // gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(renderData.normals), gl.STATIC_DRAW);
+    // const uvBuffer = gl.createBuffer();
+    // gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+    // gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(renderData.uv), gl.STATIC_DRAW);
+    // //const indexBuffer = gl.createBuffer();
+    // //gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    // //gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(elementData), gl.STATIC_DRAW);
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clearDepth(1.0);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.vertexAttribPointer(locations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(locations.vertexPosition);
-    gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
-    gl.vertexAttribPointer(locations.surfaceNormal, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(locations.surfaceNormal);
-    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
-    gl.vertexAttribPointer(locations.UV, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(locations.UV);
+    // gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    // gl.vertexAttribPointer(
+    //     locations.vertexPosition,
+    //     3,
+    //     gl.FLOAT,
+    //     false,
+    //     0,
+    //     0
+    // );
+    // gl.enableVertexAttribArray(
+    //     locations.vertexPosition
+    // );
+    // gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+    // gl.vertexAttribPointer(
+    //     locations.surfaceNormal,
+    //     3,
+    //     gl.FLOAT,
+    //     false,
+    //     0,
+    //     0
+    // );
+    // gl.enableVertexAttribArray(
+    //     locations.surfaceNormal
+    // );
+    // gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+    // gl.vertexAttribPointer(
+    //     locations.UV,
+    //     2,
+    //     gl.FLOAT,
+    //     false,
+    //     0,
+    //     0
+    // );
+    // gl.enableVertexAttribArray(
+    //     locations.UV
+    // );
     gl.useProgram(shaderProgram);
     var near = 0.01;
     var far = 100;
@@ -213,6 +369,29 @@ function main() {
         gl.uniform4fv(locations.modelViewRotation, rotquat);
         gl.uniform3fv(locations.modelViewTranslation, cameraController.position.asArray() //[0, 0, -6]
         );
-        gl.drawArrays(gl.TRIANGLES, 0, renderData.verts.length);
+        workerManager.draw([
+            {
+                location: gl.getAttribLocation(shaderProgram, "vertexPosition"),
+                attribName: "vertexPosition",
+                size: 3,
+                stride: 0,
+                type: gl.FLOAT
+            },
+            {
+                location: gl.getAttribLocation(shaderProgram, "surfaceNormal"),
+                attribName: "surfaceNormal",
+                size: 3,
+                stride: 0,
+                type: gl.FLOAT
+            },
+            {
+                location: gl.getAttribLocation(shaderProgram, "UV"),
+                attribName: "UV",
+                size: 2,
+                stride: 0,
+                type: gl.FLOAT
+            }
+        ]);
+        // gl.drawArrays(gl.TRIANGLES, 0, renderData.verts.length);
     }, 16);
 }

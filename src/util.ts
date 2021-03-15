@@ -94,3 +94,54 @@ class OctreeNode<T extends Octreeable> {
         }
     }
 }
+
+interface vec3LookupTableForEachCallback<V> {
+    (value: V, key: vec3): void
+}
+
+export class Vec3LookupTable<V> {
+    contents: Map<number, Map<number, Map<number, V>>>;
+    
+    constructor () {
+        this.contents = new Map();
+    }
+
+    get(v: vec3): V {
+        return this.contents?.get(v.x)?.get(v.y)?.get(v.z);
+    }
+
+    set(v: vec3, data: V): void {
+        let yMap = this.contents.has(v.x) ? this.contents.get(v.x) : this.contents.set(v.x, new Map()).get(v.x);
+        let zMap = yMap.has(v.y) ? yMap.get(v.y) : yMap.set(v.y, new Map()).get(v.y);
+        zMap.set(v.z, data);
+    }
+
+    delete(v: vec3): void {
+        let yMap = this.contents.get(v.x);
+        let zMap = yMap.get(v.y);
+        zMap.delete(v.z);
+        if (zMap.size == 0) {
+            yMap.delete(v.y);
+            if (yMap.size == 0) {
+                this.contents.delete(v.x);
+            }
+        }
+    }
+
+    has(v: vec3): boolean {
+        if (!this.contents.has(v.x)) return false;
+        if (!this.contents.get(v.x).has(v.y)) return false;
+        if (!this.contents.get(v.x).get(v.y).has(v.z)) return false;
+        return true;
+    }
+
+    forEach(callback: vec3LookupTableForEachCallback<V>) {
+        this.contents.forEach((yMap, x) => {
+            yMap.forEach((zMap, y) => {
+                zMap.forEach((value, z) => {
+                    callback(value, new vec3(x, y, z));
+                });
+            });
+        });
+    }
+}
