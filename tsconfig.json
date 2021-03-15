@@ -1,0 +1,8 @@
+{
+    "compilerOptions": {
+        "outDir": "build",
+        "rootDir": "src",
+        "module": "es6",
+        "lib": ["dom", "es6"]
+    }
+}

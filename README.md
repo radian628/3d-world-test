@@ -1,0 +1,2 @@
+# 3d-world-test
+3D, procedurally generated worlds, rendered in WebGL. More of an exercise for me to learn TypeScript, WebGL, and Quaternion Math (among other things) than anything else. If I find that this project is actually going somewhere, I might turn it into a game or something.
